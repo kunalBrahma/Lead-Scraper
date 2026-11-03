@@ -1,0 +1,156 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light dark;
+  --bg: #f7f8f8;
+  --panel: #ffffff;
+  --text: #15201f;
+  --muted: #5b6b69;
+  --line: #dde3e2;
+  --accent: #0f766e;
+  --accent-text: #ffffff;
+  --warn: #b45309;
+  --warn-bg: #fef3c7;
+  --danger: #b91c1c;
+  --danger-bg: #fee2e2;
+  --good: #047857;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101615;
+    --panel: #18211f;
+    --text: #e8eeed;
+    --muted: #9aaba8;
+    --line: #2c3836;
+    --accent: #2dd4bf;
+    --accent-text: #06201d;
+    --warn: #fbbf24;
+    --warn-bg: #3b2a0a;
+    --danger: #fca5a5;
+    --danger-bg: #3f1616;
+    --good: #34d399;
+  }
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.label {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.input:focus-visible,
+.btn:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 500;
+  padding: 6px 12px;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex: 1;
+  font-weight: 500;
+  padding: 10px 4px;
+}
+
+.tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.notice-warn {
+  background: var(--warn-bg);
+  border-radius: 6px;
+  color: var(--warn);
+  padding: 8px 10px;
+}
+
+.notice-danger {
+  background: var(--danger-bg);
+  border-radius: 6px;
+  color: var(--danger);
+  padding: 8px 10px;
+}
+
+.progress {
+  background: var(--line);
+  border-radius: 99px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.progress > div {
+  background: var(--accent);
+  height: 100%;
+  transition: width 0.3s;
+}
+
+.tier-high {
+  color: var(--good);
+}
+
+.tier-medium {
+  color: var(--warn);
+}
+
+.tier-low {
+  color: var(--muted);
+}
