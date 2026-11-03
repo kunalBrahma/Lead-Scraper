@@ -38,6 +38,7 @@ vi.stubGlobal('chrome', {
 const { pumpEnrichment, queueMissingContext, recoverEnrichment, retryFailedWebsites } = await import('@/background/enrichQueue');
 const engine = await import('@/background/engine');
 const { db } = await import('@/lib/db');
+const { isSendRunning, resetAfterCrmChange } = await import('@/lib/crmAddress');
 
 function business(over: Partial<MapsBusiness> = {}): MapsBusiness {
   return {
@@ -277,11 +278,87 @@ describe('database upgrade', () => {
     expect(lead).toMatchObject({ score: 85, tier: 'high', searchArea: 'Spokane, WA' });
     expect(await db.leads.where('companyKeys').equals('d:spokanerooter.com').count()).toBe(1);
     expect(lead?.context).toBeNull();
-    expect(lead).toMatchObject({ deliveryStatus: 'sent', crmNote: null, crmSentAt: null });
+    expect(lead).toMatchObject({ deliveryStatus: 'unsent', crmNote: null, crmSentAt: null });
     expect(lead).not.toHaveProperty('deliveryAttempts');
     const pending = await db.leads.get('ChIJfail');
     expect(pending).toMatchObject({ deliveryStatus: 'unsent', emails: [] });
     expect(pending).not.toHaveProperty('nextDeliveryAt');
     expect(await queueMissingContext()).toBe(2);
+  });
+
+  it('frees leads marked sent by the previous version, without knowing which CRM they went to', async () => {
+    db.close();
+    await Dexie.delete('lead-scraper');
+    const old = new Dexie('lead-scraper');
+    old.version(5).stores({
+      leads: 'placeId, runId, domain, [domain+phone], enrichStatus, deliveryStatus, tier, score, collectedAt, *companyKeys',
+      jobs: '++id, runId, [runId+status], status',
+      runs: '++id, status, createdAt',
+      mx: 'domain',
+      sendJobs: '++id, status, createdAt',
+    });
+    await old.open();
+    await old.table('leads').bulkAdd(
+      ['sent', 'duplicate', 'rejected', 'unsent'].map((deliveryStatus) => ({
+        ...business({ placeId: `ChIJ${deliveryStatus}`, website: null, domain: null }),
+        deliveryStatus, crmNote: 'old note', crmSentAt: 5, emails: [{ address: 'keep@acme.example' }], score: 70,
+      })),
+    );
+    await old.table('sendJobs').add({ status: 'done', createdAt: 1, placeIds: [] });
+    old.close();
+
+    await db.open();
+    const leads = await db.leads.toArray();
+    expect(leads.map((lead) => lead.deliveryStatus)).toEqual(['unsent', 'unsent', 'unsent', 'unsent']);
+    expect(leads.every((lead) => lead.crmNote === null && lead.crmSentAt === null)).toBe(true);
+    expect(leads[0]?.emails).toHaveLength(1);
+    expect(leads[0]?.score).toBe(70);
+    expect(await db.sendJobs.count()).toBe(0);
+  });
+});
+
+describe('changing the CRM address', () => {
+  const LOCAL = 'http://localhost:3000';
+  const LIVE = 'https://crm.example';
+
+  beforeEach(async () => {
+    await db.leads.bulkAdd(
+      (['sent', 'duplicate', 'rejected', 'unsent'] as const).map((deliveryStatus) => ({
+        ...business({ placeId: `ChIJ${deliveryStatus}`, website: null, domain: null }),
+        phone: null, sitePhones: [], runId: 1, keyword: 'x', searchArea: null, companyKeys: [], collectedAt: 0, emails: [],
+        socials: {}, metaDescription: null, context: null, enrichStatus: 'done' as const, enrichError: null, score: 25, tier: 'low' as const, crmSentAt: null,
+        evidence: { activeListing: true, websiteLive: false, websiteParked: false, websiteMatch: false, phoneValid: false, phoneMatch: false, emailVerified: false, emailRelated: false, emailSource: null, mxValid: null },
+        deliveryStatus,
+        crmNote: 'note',
+      })),
+    );
+    await db.sendJobs.add({
+      clientBatchId: 'old', crmBatchId: null, label: null, status: 'done', placeIds: [], cursor: 0, created: 1,
+      alreadyImported: 0, duplicates: 0, rejected: 0, attempts: 0, nextAttemptAt: 0, error: null, createdAt: 1, updatedAt: 1,
+    });
+  });
+
+  it('frees every handled lead and clears old results for a new address', async () => {
+    expect(await resetAfterCrmChange(LOCAL, LIVE)).toBe(3);
+    expect(await db.leads.where('deliveryStatus').equals('unsent').count()).toBe(4);
+    expect((await db.leads.get('ChIJsent'))?.crmNote).toBeNull();
+    expect(await db.sendJobs.count()).toBe(0);
+  });
+
+  it.each([
+    ['the same address', LIVE, LIVE],
+    ['the same address written differently', `${LIVE}/admin/leads`, LIVE],
+    ['a first-time setup', '', LIVE],
+    ['clearing the address', LIVE, null],
+  ])('changes nothing for %s', async (_label, previous, next) => {
+    expect(await resetAfterCrmChange(previous, next)).toBe(0);
+    expect((await db.leads.get('ChIJsent'))?.deliveryStatus).toBe('sent');
+    expect(await db.sendJobs.count()).toBe(1);
+  });
+
+  it('knows when a send is running', async () => {
+    expect(await isSendRunning()).toBe(false);
+    await db.sendJobs.toCollection().modify({ status: 'running' });
+    expect(await isSendRunning()).toBe(true);
   });
 });

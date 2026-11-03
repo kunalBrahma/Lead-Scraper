@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { crmPermissionPattern, parseCrmOrigin } from '@/lib/crm';
+import { isSendRunning, resetAfterCrmChange } from '@/lib/crmAddress';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { DEFAULT_SETTINGS, type Settings } from '@/lib/types';
 import { send } from './RunTab';
@@ -28,13 +29,22 @@ export function SettingsTab() {
       setMessage({ ok: false, text: 'Chrome access to the CRM was declined, so nothing was saved.' });
       return false;
     }
+    const previous = await getSettings();
+    if (origin !== parseCrmOrigin(previous.crmUrl) && (await isSendRunning())) {
+      setMessage({ ok: false, text: 'Pause or finish the current send before changing the CRM address.' });
+      return false;
+    }
     await saveSettings({
       ...settings,
       crmUrl: origin ?? '',
       crmKey: settings.crmKey.trim(),
       crawlConcurrency: Math.min(10, Math.max(1, Math.round(settings.crawlConcurrency) || 1)),
     });
-    setMessage({ ok: true, text: 'Saved.' });
+    const reset = await resetAfterCrmChange(previous.crmUrl, origin);
+    setMessage({
+      ok: true,
+      text: reset > 0 ? `Saved. ${reset.toLocaleString()} leads can now be sent to this CRM.` : 'Saved.',
+    });
     return true;
   }
 

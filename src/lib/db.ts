@@ -55,6 +55,18 @@ class LeadDatabase extends Dexie {
           lead.crmSentAt = null;
         }),
       );
+    // Sent statuses didn't record which CRM they meant, so they can't be trusted after
+    // switching address. All leads can be sent again, and the CRM rejects duplicates.
+    this.version(6)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx.table<SendJob, number>('sendJobs').clear();
+        await tx.table<Lead, string>('leads').toCollection().modify((lead) => {
+          lead.deliveryStatus = 'unsent';
+          lead.crmNote = null;
+          lead.crmSentAt = null;
+        });
+      });
   }
 }
 

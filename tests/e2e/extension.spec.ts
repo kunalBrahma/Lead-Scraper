@@ -362,6 +362,39 @@ test('sends nothing until clicked, then exactly the chosen leads', async () => {
   }
 });
 
+test('lets leads be sent again after switching to a different CRM', async () => {
+  const local = await startFakeCrm();
+  const live = await startFakeCrm();
+  const { panel, cleanup } = await launch();
+  try {
+    await collectLeads(panel);
+    await saveCrmSettings(panel, local.origin);
+    await panel.getByRole('tab', { name: 'Leads' }).click();
+    await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+    await panel.getByRole('button', { name: 'Send 10 leads to CRM' }).click();
+    await expect(panel.getByTestId('send-status')).toHaveText('Send finished', { timeout: 15_000 });
+    await expect(panel.getByRole('button', { name: 'Send 0 leads to CRM' })).toBeDisabled();
+
+    await panel.getByRole('tab', { name: 'Settings' }).click();
+    await panel.getByLabel('CRM address').fill(live.origin);
+    await panel.getByRole('button', { name: 'Save' }).click();
+    await expect(panel.getByRole('status')).toHaveText('Saved. 10 leads can now be sent to this CRM.');
+    // Switching address sends nothing by itself.
+    expect(live.requests).toEqual([]);
+
+    await panel.getByRole('tab', { name: 'Leads' }).click();
+    await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+    await panel.getByRole('button', { name: 'Send 10 leads to CRM' }).click();
+    await expect(panel.getByTestId('send-results')).toContainText('10 added', { timeout: 15_000 });
+    expect(live.leadRequests()).toHaveLength(1);
+    expect(local.leadRequests()).toHaveLength(1);
+  } finally {
+    await cleanup();
+    await local.stop();
+    await live.stop();
+  }
+});
+
 test('shows a wrong key, then resumes without resending', async () => {
   const crm = await startFakeCrm();
   const { panel, cleanup } = await launch();
