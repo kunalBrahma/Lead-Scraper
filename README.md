@@ -169,7 +169,7 @@ Once listings are captured from Maps:
   - **CSV** (compatible with Excel, Google Sheets, HubSpot, Salesforce)
   - **Excel (.xlsx)** (structured, formatted tables)
   - **JSON** (full hierarchical payload with metadata and evidence)
-- **Send to CRM:** In **Settings**, enter your CRM address and import key, then click **Test connection**. In **Leads**, filter or tick the leads you want, name the batch, and click **Send N leads to CRM**. Sent leads are marked and skipped next time, and rejected leads can be sent again.
+- **Send to CRM:** Generate an import key in your CRM's **Site Settings**. In the extension's **Settings**, enter your CRM address and that key, then click **Test connection**. In **Leads**, filter or tick the leads you want, name the batch, and click **Send N leads to CRM**. Sent leads are marked and skipped next time, and rejected leads can be sent again.
 
 ### 4. Handling CAPTCHAs & Pacing
 
