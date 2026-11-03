@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { applyFilters, bestEmail, categoryOptions, DEFAULT_FILTERS, type LeadFilters } from '@/lib/filters';
 import { saveSettings } from '@/lib/settings';
 import type { Lead } from '@/lib/types';
+import { SendToCrm } from './SendToCrm';
 import { send } from './RunTab';
 
 const POLL_MS = 3_000;
@@ -31,10 +32,17 @@ async function exportXlsx(leads: Lead[], filename: string): Promise<void> {
   download(await writeExcelFile(rows).toBlob(), filename);
 }
 
+const CRM_LABEL: Record<Exclude<Lead['deliveryStatus'], 'unsent'>, string> = {
+  sent: 'Sent to CRM',
+  duplicate: 'Not added',
+  rejected: 'Rejected by CRM',
+};
+
 export function LeadsTab() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [filters, setFilters] = useState<LeadFilters>(DEFAULT_FILTERS);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let alive = true;
@@ -60,6 +68,19 @@ export function LeadsTab() {
     [leads],
   );
   const failedWebsites = useMemo(() => leads.filter((lead) => lead.enrichStatus === 'failed').length, [leads]);
+  const toggle = (placeId: string) =>
+    setTicked((current) => {
+      const next = new Set(current);
+      if (next.has(placeId)) next.delete(placeId);
+      else next.add(placeId);
+      return next;
+    });
+  // Ticks choose specific leads, and with none ticked the send follows the filters.
+  const selection = useMemo(() => {
+    const chosen = leads.filter((lead) => ticked.has(lead.placeId));
+    return chosen.length ? chosen : filtered;
+  }, [leads, filtered, ticked]);
+
   const patch = (next: Partial<LeadFilters>) => setFilters((current) => ({ ...current, ...next }));
 
   async function collectContext() {
@@ -141,6 +162,17 @@ export function LeadsTab() {
             </select>
           </div>
           <div>
+            <label className="label" htmlFor="crmStatus">CRM status</label>
+            <select id="crmStatus" className="input" value={filters.crmStatus}
+              onChange={(e) => patch({ crmStatus: e.target.value as LeadFilters['crmStatus'] })}>
+              <option value="any">Any</option>
+              <option value="unsent">Not sent</option>
+              <option value="sent">Sent</option>
+              <option value="duplicate">Already in CRM</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+          <div>
             <label className="label" htmlFor="emailKind">Email domain</label>
             <select id="emailKind" className="input" value={filters.emailKind}
               onChange={(e) => patch({ emailKind: e.target.value as LeadFilters['emailKind'] })}>
@@ -187,6 +219,8 @@ export function LeadsTab() {
         </div>
       </section>
 
+      <SendToCrm selection={selection} tickedCount={selection === filtered ? 0 : selection.length} onSent={() => setTicked(new Set())} />
+
       <section className="card flex flex-col gap-2" aria-label="Leads">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <strong className="tabular-nums" data-testid="lead-count">
@@ -219,7 +253,10 @@ export function LeadsTab() {
           {filtered.slice(0, SHOWN_ROWS).map((lead) => (
             <li key={lead.placeId} className="py-2">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="font-medium">{lead.name}</span>
+                <label className="flex min-w-0 items-baseline gap-2">
+                  <input type="checkbox" checked={ticked.has(lead.placeId)} onChange={() => toggle(lead.placeId)} />
+                  <span className="font-medium">{lead.name}</span>
+                </label>
                 <span className={`tabular-nums font-semibold tier-${lead.tier}`} title={`${lead.tier} confidence`}>
                   {lead.score}
                 </span>
@@ -231,6 +268,11 @@ export function LeadsTab() {
                 {[lead.phone ?? lead.phoneRaw, bestEmail(lead)?.address].filter(Boolean).join(' · ')}
               </div>
               {lead.enrichError && <div className="muted text-xs">{lead.enrichError}</div>}
+              {lead.deliveryStatus !== 'unsent' && (
+                <div className="muted text-xs" data-testid="crm-status">
+                  {CRM_LABEL[lead.deliveryStatus]}{lead.crmNote ? `: ${lead.crmNote}` : ''}
+                </div>
+              )}
               {lead.context?.summary && <div className="muted mt-1 line-clamp-2 text-xs">{lead.context.summary}</div>}
               {!!lead.context?.services.length && (
                 <div className="muted line-clamp-1 text-xs">Services: {lead.context.services.join(', ')}</div>

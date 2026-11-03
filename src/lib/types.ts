@@ -1,6 +1,6 @@
 export type BusinessStatus = 'open' | 'permanently_closed' | 'temporarily_closed';
 export type EnrichStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
-export type DeliveryStatus = 'pending' | 'delivered' | 'failed' | 'filtered' | 'duplicate';
+export type DeliveryStatus = 'unsent' | 'sent' | 'duplicate' | 'rejected';
 export type ScoreTier = 'high' | 'medium' | 'low';
 
 export interface EmailRecord {
@@ -128,8 +128,9 @@ export interface Lead extends MapsBusiness {
   score: number;
   tier: ScoreTier;
   deliveryStatus: DeliveryStatus;
-  deliveryAttempts: number;
-  nextDeliveryAt: number;
+  /** The CRM's reason, such as which detail matched an existing lead. */
+  crmNote: string | null;
+  crmSentAt: number | null;
 }
 
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed';
@@ -187,18 +188,39 @@ export interface MxRecord {
   checkedAt: number;
 }
 
+export type SendJobStatus = 'running' | 'done' | 'failed' | 'stopped';
+
+/** One click of "Send to CRM". It is saved first, so a send can resume after a restart. */
+export interface SendJob {
+  id?: number;
+  clientBatchId: string;
+  crmBatchId: string | null;
+  label: string | null;
+  status: SendJobStatus;
+  placeIds: string[];
+  /** Position of the next lead to send. */
+  cursor: number;
+  created: number;
+  alreadyImported: number;
+  duplicates: number;
+  rejected: number;
+  attempts: number;
+  nextAttemptAt: number;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Settings {
   enrichmentEnabled: boolean;
   crawlConcurrency: number;
-  webhookUrl: string;
-  webhookSecret: string;
-  webhookMinScore: number;
+  crmUrl: string;
+  crmKey: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   enrichmentEnabled: true,
   crawlConcurrency: 5,
-  webhookUrl: '',
-  webhookSecret: '',
-  webhookMinScore: 0,
+  crmUrl: '',
+  crmKey: '',
 };

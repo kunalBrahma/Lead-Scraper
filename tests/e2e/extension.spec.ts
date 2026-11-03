@@ -1,4 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium, expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
@@ -10,7 +12,7 @@ import { fakeResponse, fakeRow } from '../fixtures/mapsResponse';
  * flow works, and cannot prove the real Maps page still behaves like this fake.
  */
 
-const EXTENSION = path.resolve('output/chrome-mv3');
+const EXTENSION = path.resolve('output-e2e/chrome-mv3');
 const PER_PAGE = 5;
 const PAGES = 2;
 
@@ -234,5 +236,159 @@ test('normal Maps browsing is not captured when no run is active', async () => {
     await expect(panel.getByTestId('lead-count')).toHaveText('0 of 0 leads');
   } finally {
     await cleanup();
+  }
+});
+
+const CRM_KEY = 'slk_import_e2e_test_key';
+
+interface CrmRequest {
+  authorization: string | undefined;
+  body: { client_batch_id: string; label: string | null; leads: { place_id: string; name: string }[] };
+}
+
+/** A stand-in CRM that records every request it receives. */
+async function startFakeCrm() {
+  const requests: CrmRequest[] = [];
+  const state = { key: CRM_KEY, stored: new Set<string>() };
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => (raw += chunk));
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}');
+      requests.push({ authorization: req.headers.authorization, body });
+      const reply = (status: number, value: unknown) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(value));
+      };
+      if (req.headers.authorization !== `Bearer ${state.key}`) return reply(401, { error: 'Unauthorized' });
+      if (!body.leads?.length) return reply(400, { error: 'Invalid import request' });
+      const created: string[] = [];
+      const duplicates: unknown[] = [];
+      for (const lead of body.leads) {
+        if (state.stored.has(lead.place_id)) duplicates.push({ place_id: lead.place_id, reason: 'place_id', matched_place_id: lead.place_id });
+        else {
+          state.stored.add(lead.place_id);
+          created.push(lead.place_id);
+        }
+      }
+      reply(200, { batch_id: 'crm-batch', created, already_imported: [], duplicates, invalid: [], suppressed: [] });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    origin: `http://localhost:${port}`,
+    requests,
+    state,
+    leadRequests: () => requests.filter((request) => request.body.leads?.length),
+    stop: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+async function collectLeads(panel: Page) {
+  await startRun(panel, 'plumber');
+  await expect(status(panel)).toHaveText('Finished', { timeout: 90_000 });
+  await panel.getByRole('tab', { name: 'Leads' }).click();
+  await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+  await expect(panel.getByTestId('lead-count')).toHaveText('10 of 10 leads', { timeout: 10_000 });
+}
+
+async function saveCrmSettings(panel: Page, origin: string, key = CRM_KEY) {
+  await panel.getByRole('tab', { name: 'Settings' }).click();
+  await panel.getByLabel('CRM address').fill(origin);
+  await panel.getByLabel('Import key').fill(key);
+  await panel.getByRole('button', { name: 'Save' }).click();
+  await expect(panel.getByRole('status')).toHaveText('Saved.');
+}
+
+test('sends nothing until clicked, then exactly the chosen leads', async () => {
+  const crm = await startFakeCrm();
+  const { panel, cleanup } = await launch();
+  try {
+    await collectLeads(panel);
+    await expect(panel.getByText('Add your CRM address and import key in Settings')).toBeVisible();
+
+    await saveCrmSettings(panel, crm.origin);
+    // Long enough for the 30-second alarm to pass, proving a wake-up doesn't send.
+    await panel.waitForTimeout(35_000);
+    expect(crm.requests).toEqual([]);
+
+    await panel.getByRole('button', { name: 'Test connection' }).click();
+    await expect(panel.getByRole('status')).toContainText('Connected');
+    expect(crm.requests).toHaveLength(1);
+    expect(crm.leadRequests()).toEqual([]);
+
+    await panel.getByRole('tab', { name: 'Leads' }).click();
+    await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+    await panel.getByRole('button', { name: 'Send 10 leads to CRM' }).waitFor();
+
+    // Filters decide what is sent when nothing is ticked.
+    await panel.getByLabel('Search name, city, or category').fill('Business 0-');
+    await panel.getByRole('button', { name: 'Send 5 leads to CRM' }).waitFor();
+    expect(crm.leadRequests()).toEqual([]);
+
+    // Ticks override the filters.
+    await panel.getByRole('checkbox', { name: 'Business 0-1', exact: true }).check();
+    await panel.getByRole('checkbox', { name: 'Business 0-3', exact: true }).check();
+    await panel.getByLabel('Batch name (optional)').fill('Ticked leads');
+    await panel.getByRole('button', { name: 'Send 2 leads to CRM' }).click();
+    await expect(panel.getByTestId('send-status')).toHaveText('Send finished', { timeout: 15_000 });
+    await expect(panel.getByTestId('send-results')).toContainText('2 added');
+
+    expect(crm.leadRequests()).toHaveLength(1);
+    const [first] = crm.leadRequests();
+    expect(first!.authorization).toBe(`Bearer ${CRM_KEY}`);
+    expect(first!.body.label).toBe('Ticked leads');
+    expect(first!.body.leads.map((lead) => lead.name).sort()).toEqual(['Business 0-1', 'Business 0-3']);
+
+    // Already sent leads are skipped, and the rest of the filter can follow.
+    await panel.getByRole('button', { name: 'Send 3 leads to CRM' }).click();
+    await expect(panel.getByTestId('send-results')).toContainText('3 added', { timeout: 15_000 });
+    await expect(panel.getByRole('button', { name: 'Send 0 leads to CRM' })).toBeDisabled();
+    const sentIds = crm.leadRequests().flatMap((request) => request.body.leads.map((lead) => lead.place_id));
+    expect(new Set(sentIds).size).toBe(5);
+    expect(sentIds).toHaveLength(5);
+
+    // Sent status survives reopening the panel.
+    await panel.reload();
+    await panel.getByRole('tab', { name: 'Leads' }).click();
+    await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+    await panel.getByLabel('CRM status').selectOption('sent');
+    await expect(panel.getByTestId('lead-count')).toHaveText('5 of 10 leads');
+    await expect(panel.getByTestId('crm-status').first()).toHaveText('Sent to CRM');
+  } finally {
+    await cleanup();
+    await crm.stop();
+  }
+});
+
+test('shows a wrong key, then resumes without resending', async () => {
+  const crm = await startFakeCrm();
+  const { panel, cleanup } = await launch();
+  try {
+    await collectLeads(panel);
+    await saveCrmSettings(panel, crm.origin, 'wrong-key');
+    await panel.getByRole('button', { name: 'Test connection' }).click();
+    await expect(panel.getByRole('alert')).toContainText('rejected the import key');
+
+    await panel.getByRole('tab', { name: 'Leads' }).click();
+    await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+    await panel.getByRole('button', { name: 'Send 10 leads to CRM' }).click();
+    await expect(panel.getByTestId('send-status')).toHaveText('Send stopped', { timeout: 15_000 });
+    await expect(panel.getByTestId('send-job').getByRole('alert')).toContainText('rejected the import key');
+    const pageText = await panel.locator('body').innerText();
+    expect(pageText).not.toContain('wrong-key');
+
+    await saveCrmSettings(panel, crm.origin);
+    await panel.getByRole('tab', { name: 'Leads' }).click();
+    await panel.getByRole('button', { name: 'Resume' }).click();
+    await expect(panel.getByTestId('send-status')).toHaveText('Send finished', { timeout: 15_000 });
+    await expect(panel.getByTestId('send-results')).toContainText('10 added');
+
+    await panel.getByRole('checkbox', { name: 'One per company' }).uncheck();
+    await expect(panel.getByRole('button', { name: 'Send 0 leads to CRM' })).toBeDisabled();
+  } finally {
+    await cleanup();
+    await crm.stop();
   }
 });

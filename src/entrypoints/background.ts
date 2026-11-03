@@ -1,4 +1,3 @@
-import { postJson, pumpDelivery, retryFailedDeliveries } from '@/background/deliveryQueue';
 import {
   configureEngine,
   getAssignment,
@@ -13,29 +12,13 @@ import {
   watchdog,
 } from '@/background/engine';
 import { pumpEnrichment, queueMissingContext, recoverEnrichment, retryFailedWebsites } from '@/background/enrichQueue';
+import { pumpSend, resumeSend, startSend, stopSend, testCrmConnection } from '@/background/sendQueue';
 import type { ControlResult, RuntimeMessage } from '@/lib/messages';
-import { getSettings, isAllowedWebhookUrl } from '@/lib/settings';
 
 const WATCHDOG_ALARM = 'watchdog';
 
 function pumpAll(): void {
-  void pumpEnrichment(() => void pumpDelivery());
-  void pumpDelivery();
-}
-
-async function testWebhook(): Promise<ControlResult> {
-  const settings = await getSettings();
-  if (!isAllowedWebhookUrl(settings.webhookUrl)) {
-    return { ok: false, error: 'Use an https:// URL, or http:// for localhost.' };
-  }
-  try {
-    const response = await postJson(settings, { test: true, sent_at: new Date().toISOString() }, `test-${Date.now()}`);
-    return response.ok
-      ? { ok: true, detail: `Webhook responded with ${response.status}.` }
-      : { ok: false, error: `Webhook responded with ${response.status}.` };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Could not reach the webhook.' };
-  }
+  void pumpEnrichment(() => {});
 }
 
 async function route(message: RuntimeMessage, sender: chrome.runtime.MessageSender): Promise<unknown> {
@@ -70,18 +53,21 @@ async function route(message: RuntimeMessage, sender: chrome.runtime.MessageSend
     case 'STOP_RUN':
       await stopRun();
       return { ok: true } satisfies ControlResult;
-    case 'TEST_WEBHOOK':
-      return testWebhook();
+    case 'TEST_CRM':
+      return testCrmConnection();
+    case 'START_SEND':
+      return startSend(message.placeIds, message.label);
+    case 'STOP_SEND':
+      await stopSend();
+      return { ok: true } satisfies ControlResult;
+    case 'RESUME_SEND':
+      return resumeSend();
     case 'RETRY_WEBSITES':
       await retryFailedWebsites();
       pumpAll();
       return { ok: true } satisfies ControlResult;
     case 'COLLECT_CONTEXT':
       await queueMissingContext();
-      pumpAll();
-      return { ok: true } satisfies ControlResult;
-    case 'RETRY_DELIVERIES':
-      await retryFailedDeliveries();
       pumpAll();
       return { ok: true } satisfies ControlResult;
   }
@@ -93,11 +79,14 @@ export default defineBackground(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
   void chrome.alarms.create(WATCHDOG_ALARM, { periodInMinutes: 0.5 });
   void recoverEnrichment().then(pumpAll);
+  void pumpSend().catch(console.error);
 
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name !== WATCHDOG_ALARM) return;
     void watchdog().catch(console.error);
     pumpAll();
+    // Only continues a send you already started.
+    void pumpSend().catch(console.error);
   });
 
   chrome.tabs.onUpdated.addListener((tabId, change) => {

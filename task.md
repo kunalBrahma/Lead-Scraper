@@ -4,6 +4,8 @@ Mark items `[x]` when done and verified. See `plan.md` for the design.
 
 Verified means unit tests, or browser tests against a fake Maps page, unless a task says live. The first live run was on 2026-11-02.
 
+CRM import work is tracked in the CRM repo: `/Users/kunalbrahma/Desktop/websites/sitemakerlab/docs/lead-import/tasks.md`.
+
 ## Phase 1: Foundation
 
 - [x] Scaffold a WXT project with React, TypeScript (strict), and Tailwind
@@ -109,7 +111,8 @@ Verified means unit tests, or browser tests against a fake Maps page, unless a t
 - [x] Build webhook delivery with retries and idempotency keys
 - [x] Track delivery status and allow resending failures
 - [x] Add a test-webhook button
-- [ ] Test delivery against your real agent or a local server
+- [x] Replace automatic webhook delivery with manual Send to CRM (webhook items above are superseded)
+- [ ] Test sending against the real CRM (CRM repo, Stage 6)
 
 ## Phase 7: Accuracy audit (needs live data)
 
@@ -122,4 +125,3 @@ Verified means unit tests, or browser tests against a fake Maps page, unless a t
 ## Waiting on the user
 
 - [ ] Test niche and city
-- [ ] Agent webhook URL and tool

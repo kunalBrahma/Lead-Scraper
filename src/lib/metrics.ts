@@ -11,7 +11,7 @@ export interface RunMetrics {
   richContext: number | null;
   invalidEmailRate: number | null;
   captchasPer100: number | null;
-  webhookDelivery: number | null;
+  crmAccepted: number | null;
 }
 
 function ratio(part: number, whole: number): number | null {
@@ -29,7 +29,7 @@ export function computeMetrics(run: Run, leads: Lead[], now = Date.now()): RunMe
   const crawled = withWebsite.filter((lead) => lead.enrichStatus === 'done' || lead.enrichStatus === 'failed');
   const emails = leads.flatMap((lead) => lead.emails);
   const checkedEmails = emails.filter((email) => email.mx !== null);
-  const deliveries = leads.filter((l) => l.deliveryStatus === 'delivered' || l.deliveryStatus === 'failed');
+  const crmHandled = leads.filter((l) => l.deliveryStatus !== 'unsent');
 
   return {
     uniqueLeadsPerHour: hours > 0 && run.uniqueLeads > 0 ? run.uniqueLeads / hours : null,
@@ -42,7 +42,7 @@ export function computeMetrics(run: Run, leads: Lead[], now = Date.now()): RunMe
     richContext: ratio(crawled.filter((lead) => lead.context?.level === 'rich').length, crawled.length),
     invalidEmailRate: ratio(checkedEmails.filter((email) => email.mx === false).length, checkedEmails.length),
     captchasPer100: run.searchesFinished > 0 ? (run.captchas / run.searchesFinished) * 100 : null,
-    webhookDelivery: ratio(deliveries.filter((l) => l.deliveryStatus === 'delivered').length, deliveries.length),
+    crmAccepted: ratio(crmHandled.filter((l) => l.deliveryStatus !== 'rejected').length, crmHandled.length),
   };
 }
 

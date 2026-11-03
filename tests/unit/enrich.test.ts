@@ -24,6 +24,8 @@ describe('cleanEmail', () => {
     'a1b2c3d4e5f6a7b8c9@acme.example',
     'not-an-email',
     'dummytext@gmail.com',
+    'service@publicse721stg.wpenginepowered.com',
+    'hello@acme.netlify.app',
     'mymail@mailservice.com',
   ])('rejects %s', (raw) => {
     expect(cleanEmail(raw)).toBeNull();

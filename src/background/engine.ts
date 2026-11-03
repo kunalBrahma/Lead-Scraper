@@ -235,9 +235,9 @@ function buildLead(business: MapsBusiness, run: Run, job: Job, now: number): Lea
     evidence,
     score,
     tier: tierFor(score),
-    deliveryStatus: 'pending',
-    deliveryAttempts: 0,
-    nextDeliveryAt: now,
+    deliveryStatus: 'unsent',
+    crmNote: null,
+    crmSentAt: null,
   };
 }
 

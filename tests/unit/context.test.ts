@@ -318,7 +318,7 @@ describe('outputs', () => {
     categories: [], phoneRaw: null, phone: null, website: 'https://acme.example', domain: 'acme.example', rating: 5, reviewCount: 1,
     claimed: true, businessStatus: 'open', latitude: null, longitude: null, mapsUrl: null, hours: null, runId: 1, keyword: 'x',
     searchArea: null, companyKeys: [], collectedAt: 0, emails: [], sitePhones: [], socials: {}, metaDescription: null, context,
-    enrichStatus: 'done', enrichError: null, score: 25, tier: 'low', deliveryStatus: 'pending', deliveryAttempts: 0, nextDeliveryAt: 0,
+    enrichStatus: 'done', enrichError: null, score: 25, tier: 'low', deliveryStatus: 'unsent', crmNote: null, crmSentAt: null,
     evidence: { activeListing: true, websiteLive: true, websiteParked: false, websiteMatch: true, phoneValid: false, phoneMatch: false, emailVerified: false, emailRelated: false, emailSource: null, mxValid: null },
   } as Lead;
 

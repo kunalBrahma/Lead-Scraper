@@ -8,7 +8,7 @@
 [![Vitest](https://img.shields.io/badge/Tested%20With-Vitest%20%26%20Playwright-729B1B.svg)](https://vitest.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An open-source, local-first Chrome extension (Manifest V3) that gathers business leads directly from Google Maps, enriches them with contact details and AI-ready business context from company websites, verifies and scores each lead, and delivers results via webhooks or file exports (**CSV**, **Excel/XLSX**, **JSON**).
+An open-source, local-first Chrome extension (Manifest V3) that gathers business leads directly from Google Maps, enriches them with contact details and AI-ready business context from company websites, verifies and scores each lead, and delivers results to your CRM or as file exports (**CSV**, **Excel/XLSX**, **JSON**).
 
 **Zero external scrapers. Zero API fees. 100% local in your browser.**
 
@@ -24,11 +24,11 @@ An open-source, local-first Chrome extension (Manifest V3) that gathers business
 - [Usage Guide](#-usage-guide)
   - [1. Running a Search](#1-running-a-search)
   - [2. Deep Website Enrichment](#2-deep-website-enrichment)
-  - [3. Exporting & Webhook Streaming](#3-exporting--webhook-streaming)
+  - [3. Exporting & Sending to Your CRM](#3-exporting--sending-to-your-crm)
   - [4. Handling CAPTCHAs & Pacing](#4-handling-captchas--pacing)
 - [Confidence Scoring System](#-confidence-scoring-system)
-- [AI Agent & Webhook Integration](#-ai-agent--webhook-integration)
-  - [Webhook Payload Sample](#webhook-payload-sample)
+- [CRM & AI Agent Integration](#-crm--ai-agent-integration)
+  - [Lead Payload Sample](#lead-payload-sample)
   - [Prompting AI Agents Safely](#prompting-ai-agents-safely)
 - [Development & Testing](#-development--testing)
   - [Available Scripts](#available-scripts)
@@ -52,7 +52,7 @@ An open-source, local-first Chrome extension (Manifest V3) that gathers business
 - **Email Verification with DNS-over-HTTPS:** Performs browser-side MX record checks using Cloudflare DNS-over-HTTPS (`cloudflare-dns.com`) without requiring external server infrastructure.
 - **Evidence-Based Confidence Scoring (0–100):** Evaluates live listing status, reviews, domain match, phone formatting, email origin, and MX deliverability to assign `high`, `medium`, or `low` confidence tiers.
 - **Local-First & Resilient:** Backed by **Dexie (IndexedDB)**. Search queues, crawl queues, and lead databases survive browser restarts and MV3 service worker suspensions.
-- **Agent-Ready Webhook Delivery:** Streams verified leads directly to your AI agent (n8n, Make, Zapier, LangChain, or custom REST servers) with automatic retries and `Idempotency-Key` headers.
+- **Manual Send to CRM:** Sends the leads you filter or tick to your CRM when you click, in resumable chunks of 100. Nothing is ever sent automatically.
 - **Multi-Format Export:** One-click export to clean **CSV**, **Excel (.xlsx)**, or **JSON**.
 - **Ethical Pacing & Circuit Breakers:** Automatically detects challenges or format anomalies, pauses collection safely, alerts the user, and resumes with gentle exponential backoff.
 
@@ -75,7 +75,7 @@ Lead Scraper runs entirely inside Chrome MV3 using isolated components:
 │  - Search execution & tab lifecycle manager            │
 │  - Crawl & enrichment queue (Cheerio HTML parsing)     │
 │  - Cloudflare DoH MX record resolver                   │
-│  - Webhook delivery worker with exponential backoff    │
+│  - Manual CRM send queue with resumable chunks         │
 │  - Dexie (IndexedDB) state & lead persistence          │
 └─────────────▲────────────────────────────▲─────────────┘
               │                            │
@@ -138,6 +138,8 @@ Lead Scraper runs entirely inside Chrome MV3 using isolated components:
 
 ---
 
+> **Keep your leads:** they are stored inside the extension. Removing it deletes them, and so can moving or renaming its folder, so export first. To update, run `pnpm build` and click the reload button on its card in `chrome://extensions`.
+
 ## 📖 Usage Guide
 
 ### 1. Running a Search
@@ -161,13 +163,13 @@ Once listings are captured from Maps:
 - Click **Collect Context / Enrich** to run the crawler on all extracted business websites.
 - The crawler visits the homepage, `/about`, `/contact`, and `/services` (respecting `robots.txt`) to extract email addresses, owner/contact names, services offered, and software footprints.
 
-### 3. Exporting & Webhook Streaming
+### 3. Exporting & Sending to Your CRM
 
 - **File Export:** From the **Leads** tab, export your filtered dataset to:
   - **CSV** (compatible with Excel, Google Sheets, HubSpot, Salesforce)
   - **Excel (.xlsx)** (structured, formatted tables)
   - **JSON** (full hierarchical payload with metadata and evidence)
-- **Live Webhook:** Head to **Settings**, configure your webhook endpoint (e.g., `https://api.yourdomain.com/leads` or `http://localhost:5678/webhook`), and click **Send test**. As leads are verified, they will be automatically dispatched in real time.
+- **Send to CRM:** In **Settings**, enter your CRM address and import key, then click **Test connection**. In **Leads**, filter or tick the leads you want, name the batch, and click **Send N leads to CRM**. Sent leads are marked and skipped next time, and rejected leads can be sent again.
 
 ### 4. Handling CAPTCHAs & Pacing
 
@@ -197,11 +199,11 @@ Every lead receives a confidence score from **0 to 100**, backed by tangible evi
 
 ---
 
-## 🤖 AI Agent & Webhook Integration
+## 🤖 CRM & AI Agent Integration
 
-### Webhook Payload Sample
+### Lead Payload Sample
 
-Leads dispatched to your webhook include full metadata, verification signals, and parsed website context:
+Each lead sent to your CRM includes full metadata, verification signals, and parsed website context:
 
 ```json
 {
@@ -288,7 +290,7 @@ Leads dispatched to your webhook include full metadata, verification signals, an
 }
 ```
 
-Each webhook request includes an `Idempotency-Key` HTTP header set to the listing's `place_id` to guarantee deduplication in your downstream pipeline.
+Leads are sent as a `POST` to `/api/leads/import` on your CRM address, in the form `{ client_batch_id, label, leads: [...] }`, with up to 100 leads per request and an `Authorization: Bearer <import key>` header. The server must return which leads it created, already imported, matched as duplicates, or rejected. Retries reuse the same `client_batch_id`, so the server can safely ignore repeats.
 
 ### Prompting AI Agents Safely
 
@@ -320,8 +322,8 @@ When passing extracted context to Large Language Models (e.g. OpenAI GPT-4, Clau
 ```
 lead-scraper/
 ├── src/
-│   ├── background/        # Background queues (crawl, enrichment, webhook delivery)
-│   ├── delivery/          # Webhook payload schemas & export formatters (CSV, XLSX, JSON)
+│   ├── background/        # Background queues (crawl, enrichment, CRM sending)
+│   ├── delivery/          # CRM payload schema & export formatters (CSV, XLSX, JSON)
 │   ├── enrich/            # Web crawler, Cheerio extractors, DNS-over-HTTPS MX, phone validation
 │   ├── entrypoints/       # Chrome extension entrypoints
 │   │   ├── background.ts  # Manifest V3 service worker
@@ -354,7 +356,7 @@ If Google adjusts their response schema, updating this single file restores full
   1. Google Maps (to retrieve requested searches)
   2. The target business websites you choose to enrich
   3. Cloudflare DNS (`cloudflare-dns.com`) for secure MX lookups
-  4. Your configured webhook endpoint
+  4. Your configured CRM address, only when you click **Send**
 - **Robots.txt Adherence:** The website crawler parses and respects `robots.txt` rules before fetching pages from business domains.
 - **Terms of Service & Cold Outreach:** This tool is intended for ethical market research and lead generation. Users are responsible for complying with Google's Terms of Service, CAN-SPAM, GDPR, CASL, and all relevant data privacy regulations in their jurisdiction.
 

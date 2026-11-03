@@ -35,7 +35,6 @@ vi.stubGlobal('chrome', {
   },
 });
 
-const { backoffMs, MAX_ATTEMPTS, pumpDelivery } = await import('@/background/deliveryQueue');
 const { pumpEnrichment, queueMissingContext, recoverEnrichment, retryFailedWebsites } = await import('@/background/enrichQueue');
 const engine = await import('@/background/engine');
 const { db } = await import('@/lib/db');
@@ -129,7 +128,7 @@ describe('enrichment queue', () => {
     await engine.storeBusinesses(runId, jobId, [business()], 1, false);
     await pumpEnrichment(() => {});
     await flush(async () => (await db.leads.get('ChIJ1'))?.enrichStatus === 'failed');
-    expect(await db.leads.get('ChIJ1')).toMatchObject({ enrichError: 'Could not connect to website', deliveryStatus: 'pending', score: 25 });
+    expect(await db.leads.get('ChIJ1')).toMatchObject({ enrichError: 'Could not connect to website', deliveryStatus: 'unsent', score: 25 });
   });
 
   it('rechecks failed websites without resending delivered leads', async () => {
@@ -138,13 +137,13 @@ describe('enrichment queue', () => {
     await engine.storeBusinesses(runId, jobId, [business()], 1, false);
     await pumpEnrichment(() => {});
     await flush(async () => (await db.leads.get('ChIJ1'))?.enrichStatus === 'failed');
-    await db.leads.update('ChIJ1', { deliveryStatus: 'delivered' });
+    await db.leads.update('ChIJ1', { deliveryStatus: 'sent' });
 
     siteFetch();
     expect(await retryFailedWebsites()).toBe(1);
     await pumpEnrichment(() => {});
     await flush(async () => (await db.leads.get('ChIJ1'))?.enrichStatus === 'done');
-    expect(await db.leads.get('ChIJ1')).toMatchObject({ score: 100, enrichError: null, deliveryStatus: 'delivered' });
+    expect(await db.leads.get('ChIJ1')).toMatchObject({ score: 100, enrichError: null, deliveryStatus: 'sent' });
   });
 
   it('does not crawl a social page listed as a website', async () => {
@@ -190,108 +189,6 @@ describe('enrichment queue', () => {
     await db.leads.update('ChIJ1', { enrichStatus: 'running' });
     await recoverEnrichment();
     expect((await db.leads.get('ChIJ1'))?.enrichStatus).toBe('pending');
-  });
-});
-
-describe('webhook queue', () => {
-  async function queuedLead(score = 25) {
-    const { runId, jobId } = await createRun();
-    await engine.storeBusinesses(runId, jobId, [business({ website: null })], 1, false);
-    await db.leads.update('ChIJ1', { score });
-    storage.settings = { webhookUrl: 'https://agent.example/leads', webhookSecret: 's3cret', webhookMinScore: 0 };
-    vi.mocked(fetch).mockReset();
-  }
-
-  it('sends each lead once with its key and token', async () => {
-    await queuedLead();
-    vi.mocked(fetch).mockResolvedValue(new Response('ok'));
-    await pumpDelivery();
-    await pumpDelivery();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = vi.mocked(fetch).mock.calls[0]!;
-    expect(url).toBe('https://agent.example/leads');
-    expect(init).toMatchObject({
-      method: 'POST',
-      credentials: 'omit',
-      headers: { 'idempotency-key': 'ChIJ1', authorization: 'Bearer s3cret' },
-    });
-    expect(JSON.parse(init!.body as string)).toMatchObject({ place_id: 'ChIJ1', name: 'Acme Plumbing' });
-    expect((await db.leads.get('ChIJ1'))?.deliveryStatus).toBe('delivered');
-  });
-
-  it('sends only the strongest listing of a company', async () => {
-    const { runId, jobId } = await createRun();
-    await engine.storeBusinesses(runId, jobId, [
-      business({ placeId: 'ChIJweak', website: null, domain: 'chain.example', phoneRaw: '(213) 373-4254' }),
-      business({ placeId: 'ChIJstrong', website: null, domain: 'chain.example', phoneRaw: '(213) 373-4255' }),
-    ], 2, false);
-    await db.leads.update('ChIJstrong', { score: 90 });
-    storage.settings = { webhookUrl: 'https://agent.example/leads' };
-    vi.mocked(fetch).mockReset();
-    vi.mocked(fetch).mockImplementation(async () => new Response('ok'));
-    await pumpDelivery();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect((await db.leads.get('ChIJstrong'))?.deliveryStatus).toBe('delivered');
-    expect((await db.leads.get('ChIJweak'))?.deliveryStatus).toBe('duplicate');
-  });
-
-  it.each([[500], [429]])('retries later after a %i', async (status) => {
-    await queuedLead();
-    vi.mocked(fetch).mockResolvedValue(new Response('', { status }));
-    const before = Date.now();
-    await pumpDelivery();
-    const lead = (await db.leads.get('ChIJ1'))!;
-    expect(lead).toMatchObject({ deliveryStatus: 'pending', deliveryAttempts: 1 });
-    expect(lead.nextDeliveryAt).toBeGreaterThanOrEqual(before + 30_000);
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries after a network error', async () => {
-    await queuedLead();
-    vi.mocked(fetch).mockRejectedValue(new Error('offline'));
-    await pumpDelivery();
-    expect(await db.leads.get('ChIJ1')).toMatchObject({ deliveryStatus: 'pending', deliveryAttempts: 1 });
-  });
-
-  it('gives up at once on a permanent rejection', async () => {
-    await queuedLead();
-    vi.mocked(fetch).mockResolvedValue(new Response('', { status: 401 }));
-    await pumpDelivery();
-    expect((await db.leads.get('ChIJ1'))?.deliveryStatus).toBe('failed');
-  });
-
-  it('gives up after the maximum attempts', async () => {
-    await queuedLead();
-    await db.leads.update('ChIJ1', { deliveryAttempts: MAX_ATTEMPTS - 1 });
-    vi.mocked(fetch).mockResolvedValue(new Response('', { status: 500 }));
-    await pumpDelivery();
-    expect((await db.leads.get('ChIJ1'))?.deliveryStatus).toBe('failed');
-  });
-
-  it('holds back low scores and leads still being checked', async () => {
-    await queuedLead(10);
-    storage.settings = { webhookUrl: 'https://agent.example/leads', webhookMinScore: 50 };
-    await pumpDelivery();
-    expect((await db.leads.get('ChIJ1'))?.deliveryStatus).toBe('filtered');
-
-    await db.leads.update('ChIJ1', { deliveryStatus: 'pending', enrichStatus: 'running', score: 90 });
-    await pumpDelivery();
-    expect(fetch).not.toHaveBeenCalled();
-    expect((await db.leads.get('ChIJ1'))?.deliveryStatus).toBe('pending');
-  });
-
-  it('sends nothing to an insecure remote webhook or without permission', async () => {
-    await queuedLead();
-    storage.settings = { webhookUrl: 'http://agent.example/leads' };
-    await pumpDelivery();
-    storage.settings = { webhookUrl: 'https://agent.example/leads' };
-    permissionGranted = false;
-    await pumpDelivery();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('backs off exponentially with a cap', () => {
-    expect([backoffMs(1), backoffMs(2), backoffMs(3), backoffMs(20)]).toEqual([30_000, 60_000, 120_000, 1_800_000]);
   });
 });
 
@@ -362,7 +259,15 @@ describe('database upgrade', () => {
       ],
       socials: {}, metaDescription: null, context: { level: 'rich', services: ['Plano, TX'] }, enrichStatus: 'done', enrichError: null,
       evidence: { activeListing: true, websiteLive: true, websiteParked: false, websiteMatch: true, phoneValid: true, phoneMatch: true, emailVerified: false, emailSource: '/', mxValid: true },
-      score: 70, tier: 'medium', deliveryStatus: 'pending', deliveryAttempts: 0, nextDeliveryAt: 0,
+      score: 70, tier: 'medium', deliveryStatus: 'delivered', deliveryAttempts: 1, nextDeliveryAt: 0,
+    });
+    await old.table('leads').add({
+      ...business({ placeId: 'ChIJfail', name: 'Other Co', domain: 'other.example' }),
+      phone: null, sitePhones: [], runId: 1, keyword: 'plumber', collectedAt: 1, emails: [
+        { address: 'service@acme721stg.wpenginepowered.com', source: '/', kind: 'business', role: false, ownDomain: false, mx: true },
+      ], socials: {}, metaDescription: null, enrichStatus: 'done', enrichError: null,
+      evidence: { activeListing: true, websiteLive: true, websiteParked: false, websiteMatch: true, phoneValid: false, phoneMatch: false, emailVerified: false, emailSource: '/', mxValid: true },
+      score: 50, tier: 'medium', deliveryStatus: 'pending', deliveryAttempts: 3, nextDeliveryAt: 9,
     });
     old.close();
 
@@ -372,6 +277,11 @@ describe('database upgrade', () => {
     expect(lead).toMatchObject({ score: 85, tier: 'high', searchArea: 'Spokane, WA' });
     expect(await db.leads.where('companyKeys').equals('d:spokanerooter.com').count()).toBe(1);
     expect(lead?.context).toBeNull();
-    expect(await queueMissingContext()).toBe(1);
+    expect(lead).toMatchObject({ deliveryStatus: 'sent', crmNote: null, crmSentAt: null });
+    expect(lead).not.toHaveProperty('deliveryAttempts');
+    const pending = await db.leads.get('ChIJfail');
+    expect(pending).toMatchObject({ deliveryStatus: 'unsent', emails: [] });
+    expect(pending).not.toHaveProperty('nextDeliveryAt');
+    expect(await queueMissingContext()).toBe(2);
   });
 });

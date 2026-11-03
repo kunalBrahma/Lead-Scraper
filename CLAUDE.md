@@ -1,6 +1,6 @@
 # Lead Scraper
 
-Chrome MV3 extension that collects business leads from Google Maps, enriches them from business websites, scores them, and delivers them to another agent. Read `plan.md` for the design and `task.md` for current progress.
+Chrome MV3 extension that collects business leads from Google Maps, enriches them from business websites, scores them, and sends them to the Sitemaker Lab CRM when the user clicks. Read `plan.md` for the design and `task.md` for current progress.
 
 ## Stack
 
@@ -12,16 +12,16 @@ WXT, TypeScript (strict), React, Tailwind, Dexie, Zod, Cheerio, libphonenumber-j
 - `pnpm build`: build for production into `output/chrome-mv3`. Keep this path stable, because Chrome ties stored leads to it
 - `pnpm test`: run unit tests
 - `pnpm compile`: type-check
-- `pnpm test:e2e`: build and run browser tests against a fake Maps page
+- `pnpm test:e2e`: build into `output-e2e` and run browser tests against a fake Maps page and CRM
 
 ## Hard rules
 
 - **No CAPTCHA solving:** on a CAPTCHA or `/sorry` page, stop and wait for the user. Never add solving services.
 - **No block evasion:** no fingerprint spoofing or proxy rotation.
 - **No Leads Sniper code:** reimplement behavior independently. Never copy from recovered source.
-- **No hardcoded secrets:** the webhook URL and any tokens come from user settings.
+- **No hardcoded secrets:** the CRM address and import key come from user settings. Never log the key or lead data.
 - **Respect `robots.txt`** when crawling business websites.
-- **Keep lead data local:** it leaves the browser only through the user's configured webhook or export.
+- **Keep lead data local:** it leaves the browser only through a manual **Send to CRM** click or an export. Never send automatically.
 
 ## Architecture rules
 
@@ -30,7 +30,7 @@ WXT, TypeScript (strict), React, Tailwind, Dexie, Zod, Cheerio, libphonenumber-j
 - MV3 service workers can stop at any time. Keep queue and run state in IndexedDB, never only in memory, and use `chrome.alarms` rather than long timers.
 - Use `chrome.storage` for settings only. Leads and jobs go in Dexie.
 - Keep the crawl queue separate from Maps collection.
-- Request the narrowest permissions possible, using optional host permissions for websites and webhooks.
+- Request the narrowest permissions possible, using optional host permissions for websites and the CRM.
 - Treat scraped HTML as untrusted. Never inject it into the UI as HTML or execute it, and label it as data wherever it reaches an AI.
 
 ## Testing

@@ -24,8 +24,10 @@ export type ControlMessage =
   | { type: 'PAUSE_RUN' }
   | { type: 'RESUME_RUN' }
   | { type: 'STOP_RUN' }
-  | { type: 'TEST_WEBHOOK' }
-  | { type: 'RETRY_DELIVERIES' }
+  | { type: 'TEST_CRM' }
+  | { type: 'START_SEND'; placeIds: string[]; label: string | null }
+  | { type: 'STOP_SEND' }
+  | { type: 'RESUME_SEND' }
   | { type: 'RETRY_WEBSITES' }
   | { type: 'COLLECT_CONTEXT' };
 

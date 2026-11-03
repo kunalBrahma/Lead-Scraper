@@ -14,7 +14,7 @@ import {
   nextDelayMs,
   parseSuccessTooLow,
 } from '@/lib/pacing';
-import { isAllowedWebhookUrl } from '@/lib/settings';
+import { crmImportUrl, isSendable, parseCrmOrigin } from '@/lib/crm';
 import type { Lead, Run } from '@/lib/types';
 
 function lead(over: Partial<Lead> = {}): Lead {
@@ -29,7 +29,7 @@ function lead(over: Partial<Lead> = {}): Lead {
       activeListing: true, websiteLive: true, websiteParked: false, websiteMatch: true, phoneValid: true,
       phoneMatch: false, emailVerified: false, emailRelated: false, emailSource: null, mxValid: null,
     },
-    score: 50, tier: 'medium', deliveryStatus: 'pending', deliveryAttempts: 0, nextDeliveryAt: 0,
+    score: 50, tier: 'medium', deliveryStatus: 'unsent', crmNote: null, crmSentAt: null,
     ...over,
   };
 }
@@ -240,14 +240,29 @@ describe('pacing', () => {
   });
 });
 
-describe('webhook URL rules', () => {
-  it('allows https anywhere and http only on this machine', () => {
-    expect(isAllowedWebhookUrl('https://agent.example/leads')).toBe(true);
-    expect(isAllowedWebhookUrl('http://localhost:3000/leads')).toBe(true);
-    expect(isAllowedWebhookUrl('http://127.0.0.1:3000/')).toBe(true);
-    expect(isAllowedWebhookUrl('http://agent.example/leads')).toBe(false);
-    expect(isAllowedWebhookUrl('ftp://agent.example')).toBe(false);
-    expect(isAllowedWebhookUrl('nonsense')).toBe(false);
+describe('CRM address rules', () => {
+  it('allows https anywhere and http only on this machine, keeping only the origin', () => {
+    expect(parseCrmOrigin('https://crm.example/admin/leads?x=1')).toBe('https://crm.example');
+    expect(parseCrmOrigin(' https://crm.example ')).toBe('https://crm.example');
+    expect(parseCrmOrigin('http://localhost:3000/')).toBe('http://localhost:3000');
+    expect(parseCrmOrigin('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000');
+    for (const bad of ['http://crm.example', 'ftp://crm.example', 'nonsense', '', 'javascript:alert(1)']) {
+      expect(parseCrmOrigin(bad)).toBeNull();
+    }
+  });
+
+  it('builds the import URL', () => {
+    expect(crmImportUrl('https://crm.example')).toBe('https://crm.example/api/leads/import');
+  });
+
+  it('sends only unhandled leads with finished checks', () => {
+    expect(isSendable({ deliveryStatus: 'unsent', enrichStatus: 'done' })).toBe(true);
+    expect(isSendable({ deliveryStatus: 'rejected', enrichStatus: 'failed' })).toBe(true);
+    expect(isSendable({ deliveryStatus: 'unsent', enrichStatus: 'skipped' })).toBe(true);
+    expect(isSendable({ deliveryStatus: 'sent', enrichStatus: 'done' })).toBe(false);
+    expect(isSendable({ deliveryStatus: 'duplicate', enrichStatus: 'done' })).toBe(false);
+    expect(isSendable({ deliveryStatus: 'unsent', enrichStatus: 'pending' })).toBe(false);
+    expect(isSendable({ deliveryStatus: 'unsent', enrichStatus: 'running' })).toBe(false);
   });
 });
 
@@ -260,8 +275,8 @@ describe('metrics', () => {
 
   it('computes each rate from run data and leads', () => {
     const metrics = computeMetrics(run, [
-      lead({ emails: [{ address: 'a@a.example', source: '/', kind: 'business', role: false, ownDomain: true, related: true, mx: false }], deliveryStatus: 'delivered' }),
-      lead({ placeId: 'ChIJ2', website: null, phoneRaw: null, enrichStatus: 'skipped', deliveryStatus: 'failed' }),
+      lead({ emails: [{ address: 'a@a.example', source: '/', kind: 'business', role: false, ownDomain: true, related: true, mx: false }], deliveryStatus: 'sent' }),
+      lead({ placeId: 'ChIJ2', website: null, phoneRaw: null, enrichStatus: 'skipped', deliveryStatus: 'rejected' }),
     ]);
     expect(metrics).toEqual({
       uniqueLeadsPerHour: 2,
@@ -274,7 +289,7 @@ describe('metrics', () => {
       richContext: 0,
       invalidEmailRate: 1,
       captchasPer100: 0.5,
-      webhookDelivery: 0.5,
+      crmAccepted: 0.5,
     });
   });
 

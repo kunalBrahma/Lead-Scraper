@@ -21,7 +21,8 @@ const PLACEHOLDER_LOCAL_PARTS = new Set([
 ]);
 
 const JUNK_DOMAINS = [
-  'mailservice.com', 'example.com', 'example.org', 'domain.com', 'yourdomain.com', 'yoursite.com', 'sentry.io',
+  'mailservice.com', 'wpenginepowered.com', 'wpengine.com', 'kinsta.cloud', 'pantheonsite.io', 'netlify.app', 'vercel.app',
+  'herokuapp.com', 'example.com', 'example.org', 'domain.com', 'yourdomain.com', 'yoursite.com', 'sentry.io',
   'sentry-next.wixpress.com', 'wixpress.com', 'godaddy.com', 'squarespace.com', 'schema.org',
 ];
 

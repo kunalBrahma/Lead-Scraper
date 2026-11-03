@@ -1,12 +1,13 @@
 import Dexie, { type Table } from 'dexie';
 import { migrateLead } from './migrate';
-import type { Job, Lead, MxRecord, Run } from './types';
+import type { Job, Lead, MxRecord, Run, SendJob } from './types';
 
 class LeadDatabase extends Dexie {
   leads!: Table<Lead, string>;
   jobs!: Table<Job, number>;
   runs!: Table<Run, number>;
   mx!: Table<MxRecord, string>;
+  sendJobs!: Table<SendJob, number>;
 
   constructor() {
     super('lead-scraper');
@@ -36,6 +37,22 @@ class LeadDatabase extends Dexie {
       .upgrade((tx) =>
         tx.table<Lead, string>('leads').toCollection().modify((lead) => {
           lead.context = null;
+        }),
+      );
+    // Replaces automatic webhook delivery with manual sending. Nothing is sent by this
+    // upgrade, and leads the old webhook delivered stay marked as sent.
+    this.version(5)
+      .stores({ sendJobs: '++id, status, createdAt' })
+      .upgrade((tx) =>
+        tx.table<Lead, string>('leads').toCollection().modify((lead) => {
+          const old = lead as unknown as { deliveryStatus: string; deliveryAttempts?: number; nextDeliveryAt?: number };
+          const wasSent = old.deliveryStatus === 'delivered';
+          delete old.deliveryAttempts;
+          delete old.nextDeliveryAt;
+          migrateLead(lead);
+          lead.deliveryStatus = wasSent ? 'sent' : 'unsent';
+          lead.crmNote = null;
+          lead.crmSentAt = null;
         }),
       );
   }

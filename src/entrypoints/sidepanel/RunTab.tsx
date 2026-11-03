@@ -231,7 +231,7 @@ export function RunTab() {
               value={m?.captchasPer100 == null ? '–' : m.captchasPer100.toFixed(1)}
               target="<1"
             />
-            <Metric label="Webhook delivery" value={percent(m?.webhookDelivery ?? null)} target="100%" />
+            <Metric label="Accepted by CRM" value={percent(m?.crmAccepted ?? null)} target="100%" />
           </div>
           {!!snapshot?.enrichWaiting && (
             <p role="status" className="muted">

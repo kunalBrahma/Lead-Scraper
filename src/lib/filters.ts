@@ -17,6 +17,7 @@ export interface LeadFilters {
   requireWebsite: boolean;
   requireEmail: boolean;
   richContextOnly: boolean;
+  crmStatus: 'any' | Lead['deliveryStatus'];
   emailKind: 'any' | 'business' | 'free';
   emailRole: 'any' | 'role' | 'named';
   minScore: number;
@@ -37,6 +38,7 @@ export const DEFAULT_FILTERS: LeadFilters = {
   requireWebsite: false,
   requireEmail: false,
   richContextOnly: false,
+  crmStatus: 'any',
   emailKind: 'any',
   emailRole: 'any',
   minScore: 0,
@@ -61,6 +63,7 @@ export function matchesFilters(lead: Lead, filters: LeadFilters): boolean {
   if (filters.requireWebsite && !lead.website) return false;
   if (filters.requireEmail && !lead.emails.length) return false;
   if (filters.richContextOnly && lead.context?.level !== 'rich') return false;
+  if (filters.crmStatus !== 'any' && lead.deliveryStatus !== filters.crmStatus) return false;
   if (filters.emailKind !== 'any' && !lead.emails.some((e) => e.kind === filters.emailKind)) return false;
   if (filters.emailRole === 'role' && !lead.emails.some((e) => e.role)) return false;
   if (filters.emailRole === 'named' && !lead.emails.some((e) => !e.role)) return false;

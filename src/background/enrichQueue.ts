@@ -64,14 +64,6 @@ export async function applyCrawl(lead: Lead, crawl: CrawlResult): Promise<Partia
   };
 }
 
-/** A rechecked lead that already reached the agent is not sent again. */
-function afterCheck(lead: Lead): Pick<Lead, 'deliveryStatus' | 'nextDeliveryAt'> {
-  return {
-    deliveryStatus: lead.deliveryStatus === 'delivered' ? 'delivered' : 'pending',
-    nextDeliveryAt: Date.now(),
-  };
-}
-
 async function enrichOne(lead: Lead): Promise<void> {
   try {
     const crawl = await crawlWebsite(lead.website!, lead.name, lead.domain);
@@ -80,13 +72,11 @@ async function enrichOne(lead: Lead): Promise<void> {
       ...patch,
       enrichStatus: crawl.live || crawl.blockedByRobots ? 'done' : 'failed',
       enrichError: crawl.failure,
-      ...afterCheck(lead),
     });
   } catch (error) {
     await db.leads.update(lead.placeId, {
       enrichStatus: 'failed',
       enrichError: error instanceof Error ? error.message : 'Crawl failed',
-      ...afterCheck(lead),
     });
   }
 }
@@ -96,7 +86,7 @@ async function skipPending(): Promise<void> {
   await db.leads
     .where('enrichStatus')
     .equals('pending')
-    .modify({ enrichStatus: 'skipped', deliveryStatus: 'pending', nextDeliveryAt: Date.now() });
+    .modify({ enrichStatus: 'skipped' });
 }
 
 export async function pumpEnrichment(onSettled: () => void): Promise<void> {

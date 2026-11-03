@@ -2,7 +2,7 @@
 
 A Chrome extension that collects business leads from Google Maps with no API and no fees, finds emails on business websites, scores each lead, and sends the results to another agent.
 
-Status: Phases 1, 2, 4, 5, and 6 are built. The first live test ran on 2026-11-02 (results below). Accuracy has not been checked by hand, and sustained speed has not been measured.
+Status: Phases 1, 2, 4, 5, and 6 are built, and automatic webhook delivery has been replaced by manual **Send to CRM**. CRM work is planned in `sitemakerlab/docs/lead-import/`. The first live test ran on 2026-11-02 (results below). Accuracy has not been checked by hand, and sustained speed has not been measured.
 
 ## Goals
 
